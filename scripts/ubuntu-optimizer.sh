@@ -740,6 +740,90 @@ ufw_optimizations() {
 }
 
 
+# Install bpftune (automatic kernel/network tuning via eBPF)
+install_bpftune() {
+    echo
+    yellow_msg 'Installing bpftune... (This compiles from source and can take a while.)'
+    echo
+    sleep 0.5
+
+    ## bpftune needs kernel BTF. Ubuntu stock & XanMod both ship CONFIG_DEBUG_INFO_BTF=y.
+    if [ ! -f /sys/kernel/btf/vmlinux ]; then
+        echo
+        red_msg 'Kernel lacks BTF (/sys/kernel/btf/vmlinux missing). bpftune needs CONFIG_DEBUG_INFO_BTF=y.'
+        red_msg 'If you just installed XanMod, reboot into it first, then run this again.'
+        echo
+        sleep 1
+        return 1
+    fi
+
+    export DEBIAN_FRONTEND=noninteractive
+
+    ## Build dependencies
+    sudo apt-get update -q || true
+    sudo apt-get install -y pkg-config llvm clang make gcc libbpf-dev libnl-3-dev libnl-route-3-dev \
+        libcap-dev git python3-docutils docutils-common libelf-dev zlib1g-dev libssl-dev binutils-dev curl ca-certificates
+
+    ## Kernel headers matching the RUNNING kernel. No -generic fallback (wrong ABI on XanMod).
+    sudo apt-get install -y "linux-headers-$(uname -r)" || \
+        yellow_msg "Headers for $(uname -r) not found. On XanMod add the official repo for matching headers. BTF builds usually proceed without them."
+
+    ## Clean any old build dirs
+    rm -rf /tmp/bpftool /tmp/bpftune
+
+    ## Build bpftool from source only if missing or broken
+    if ! command -v bpftool >/dev/null 2>&1 || ! bpftool version >/dev/null 2>&1; then
+        git clone --recurse-submodules https://github.com/libbpf/bpftool.git /tmp/bpftool && \
+        cd /tmp/bpftool/src && make clean && make -j"$(nproc)" && sudo make install && \
+        sudo ln -sf /usr/local/sbin/bpftool /usr/sbin/bpftool && \
+        sudo ln -sf /usr/local/sbin/bpftool /usr/bin/bpftool
+    fi
+
+    ## Build & install bpftune
+    git clone https://github.com/oracle/bpftune.git /tmp/bpftune && \
+    cd /tmp/bpftune && make clean && make -j"$(nproc)" && sudo make install
+
+    ## Library path (bpftune installs libs to /usr/lib64 by default; non-standard on Ubuntu)
+    if [ -d /usr/lib64 ]; then
+        echo "/usr/lib64" | sudo tee /etc/ld.so.conf.d/bpftune.conf >/dev/null
+    fi
+    sudo ldconfig
+
+    ## Ensure the bpf filesystem is mounted and persistent across reboots
+    if ! mount | grep -q "/sys/fs/bpf"; then
+        sudo mount -t bpf bpf /sys/fs/bpf || true
+    fi
+    if ! grep -q "/sys/fs/bpf" /etc/fstab 2>/dev/null; then
+        echo "bpffs /sys/fs/bpf bpf defaults 0 0" | sudo tee -a /etc/fstab >/dev/null
+    fi
+
+    ## Clean stale pin & any legacy init script
+    sudo rm -rf /sys/fs/bpf/bpftune || true
+    sudo rm -f /etc/init.d/bpftune
+
+    ## Enable & start the service
+    if command -v systemctl >/dev/null 2>&1 && ps -p 1 -o comm= | grep -q systemd; then
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now bpftune
+        sudo systemctl restart bpftune
+        echo
+        green_msg 'bpftune Installed & Running (systemd).'
+        sudo systemctl status bpftune --no-pager || true
+    else
+        sudo nohup /usr/sbin/bpftune > /var/log/bpftune.log 2>&1 &
+        green_msg "bpftune Installed & Running manually (PID $!). Log: /var/log/bpftune.log"
+    fi
+
+    ## Return to a safe working directory (we cd'd into /tmp during build)
+    cd ~ 2>/dev/null || cd /
+
+    echo
+    green_msg 'bpftune Setup Complete.'
+    echo
+    sleep 0.5
+}
+
+
 # Show the Menu
 show_menu() {
     echo 
@@ -763,7 +847,9 @@ show_menu() {
     green_msg '12 - Optimize the System Limits.'
     echo 
     green_msg '13 - Install & Optimize UFW.'
-    echo 
+    echo
+    green_msg '14 - Install bpftune (automatic eBPF network tuning). Needs BTF kernel (XanMod/Ubuntu OK).'
+    echo
     red_msg 'q - Exit.'
     echo 
 }
@@ -988,6 +1074,16 @@ main() {
             sleep 0.5
 
             echo 
+            green_msg '========================='
+            green_msg  'Done.'
+            green_msg '========================='
+
+            ;;
+        14)
+            install_bpftune
+            sleep 0.5
+
+            echo
             green_msg '========================='
             green_msg  'Done.'
             green_msg '========================='
