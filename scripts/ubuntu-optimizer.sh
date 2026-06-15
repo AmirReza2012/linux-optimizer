@@ -817,6 +817,51 @@ install_bpftune() {
     ## Return to a safe working directory (we cd'd into /tmp during build)
     cd ~ 2>/dev/null || cd /
 
+    ## Optionally hand buffer/neigh sysctls to bpftune.
+    ## bpftune disables a whole tuner if ANY sysctl in its domain is set manually,
+    ## so to let it auto-tune buffers we must REMOVE those static lines from sysctl.conf.
+    ## tcp_congestion_control is intentionally NOT removed (keeps bbr/bbrv3 pinned).
+    echo
+    yellow_msg 'Hand TCP/core buffer & neigh-table sysctls over to bpftune (dynamic auto-tuning)?'
+    yellow_msg 'This removes the static caps for those from /etc/sysctl.conf. bbr stays pinned. (y/n)'
+    echo
+    read hand_over
+    echo
+    if [[ "$hand_over" == 'y' || "$hand_over" == 'Y' ]]; then
+        if [ -f "$SYS_PATH" ]; then
+            ## Backup before stripping
+            cp "$SYS_PATH" /etc/sysctl.conf.bpftune.bak
+            yellow_msg 'Saved backup: /etc/sysctl.conf.bpftune.bak'
+
+            ## Remove only the sysctls that collide with a bpftune tuner.
+            ## (TCP Buffer, Net Buffer, UDP Buffer, Neigh Table tuners)
+            sed -i -e '/net.ipv4.tcp_rmem/d' \
+                -e '/net.ipv4.tcp_wmem/d' \
+                -e '/net.ipv4.tcp_mem/d' \
+                -e '/net.core.rmem_max/d' \
+                -e '/net.core.wmem_max/d' \
+                -e '/net.core.netdev_max_backlog/d' \
+                -e '/net.core.somaxconn/d' \
+                -e '/net.ipv4.udp_mem/d' \
+                -e '/net.ipv4.neigh.default.gc_thresh1/d' \
+                -e '/net.ipv4.neigh.default.gc_thresh2/d' \
+                -e '/net.ipv4.neigh.default.gc_thresh3/d' \
+                "$SYS_PATH"
+
+            ## Reload remaining sysctls
+            sudo sysctl -p >/dev/null 2>&1 || true
+
+            echo
+            green_msg 'Buffer & neigh-table sysctls handed to bpftune. bbr/bbrv3 still pinned.'
+            echo
+        else
+            red_msg "sysctl file not found at $SYS_PATH. Skipped handover."
+        fi
+    else
+        yellow_msg 'Keeping static sysctl caps. bpftune buffer/neigh tuners will stay dormant (no conflict).'
+    fi
+    sleep 0.5
+
     echo
     green_msg 'bpftune Setup Complete.'
     echo
