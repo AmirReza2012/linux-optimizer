@@ -574,12 +574,17 @@ EOF
                 -e '/net.ipv4.tcp_mem/d' \
                 -e '/net.core.rmem_max/d' \
                 -e '/net.core.wmem_max/d' \
+                -e '/net.core.rmem_default/d' \
                 -e '/net.core.netdev_max_backlog/d' \
                 -e '/net.core.somaxconn/d' \
                 -e '/net.ipv4.udp_mem/d' \
+                -e '/net.ipv4.tcp_max_orphans/d' \
+                -e '/net.ipv4.tcp_max_syn_backlog/d' \
+                -e '/net.ipv4.tcp_syncookies/d' \
                 -e '/net.ipv4.neigh.default.gc_thresh1/d' \
                 -e '/net.ipv4.neigh.default.gc_thresh2/d' \
                 -e '/net.ipv4.neigh.default.gc_thresh3/d' \
+                -e '/net.ipv4.neigh.default.gc_stale_time/d' \
                 "$SYS_PATH"
             green_msg 'Buffer & neigh-table caps removed. bpftune retains ownership; bbr/bbrv3 still pinned.'
         else
@@ -909,12 +914,17 @@ install_bpftune() {
                 -e '/net.ipv4.tcp_mem/d' \
                 -e '/net.core.rmem_max/d' \
                 -e '/net.core.wmem_max/d' \
+                -e '/net.core.rmem_default/d' \
                 -e '/net.core.netdev_max_backlog/d' \
                 -e '/net.core.somaxconn/d' \
                 -e '/net.ipv4.udp_mem/d' \
+                -e '/net.ipv4.tcp_max_orphans/d' \
+                -e '/net.ipv4.tcp_max_syn_backlog/d' \
+                -e '/net.ipv4.tcp_syncookies/d' \
                 -e '/net.ipv4.neigh.default.gc_thresh1/d' \
                 -e '/net.ipv4.neigh.default.gc_thresh2/d' \
                 -e '/net.ipv4.neigh.default.gc_thresh3/d' \
+                -e '/net.ipv4.neigh.default.gc_stale_time/d' \
                 "$SYS_PATH"
 
             ## Reload remaining sysctls
