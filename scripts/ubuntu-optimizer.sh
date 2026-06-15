@@ -290,6 +290,10 @@ sysctl_optimizations() {
         -e '/net.ipv4.tcp_wmem/d' \
         -e '/net.ipv4.tcp_congestion_control/d' \
         -e '/net.ipv4.tcp_fastopen/d' \
+        -e '/net.ipv4.tcp_tw_reuse/d' \
+        -e '/net.ipv4.ip_local_port_range/d' \
+        -e '/net.netfilter.nf_conntrack_max/d' \
+        -e '/net.netfilter.nf_conntrack_tcp_timeout_established/d' \
         -e '/net.ipv4.tcp_fin_timeout/d' \
         -e '/net.ipv4.tcp_keepalive_time/d' \
         -e '/net.ipv4.tcp_keepalive_probes/d' \
@@ -448,6 +452,31 @@ net.ipv4.tcp_ecn_fallback = 1
 net.ipv4.tcp_syncookies = 1
 
 
+## Proxy / high-connection-count settings
+## ----------------------------------------------------------------
+## NOTE: none of these are managed by any bpftune tuner, so they never collide
+## with bpftune and are intentionally NOT stripped during a bpftune handover.
+
+# Widen the ephemeral port range (a TCP proxy opens many OUTBOUND connections
+# to upstreams; the default ~28k ports exhaust under load -> EADDRNOTAVAIL)
+net.ipv4.ip_local_port_range = 1024 65535
+
+# Reuse sockets sitting in TIME_WAIT for new outbound connections.
+# Safe on the client/proxy side and frees ports under heavy short-conn churn.
+net.ipv4.tcp_tw_reuse = 1
+
+# Enable TCP Fast Open for both inbound (server) and outbound (client) = 3
+net.ipv4.tcp_fastopen = 3
+
+# Raise the netfilter connection-tracking table. UFW/iptables is stateful and a
+# busy TCP proxy holds thousands of concurrent flows; the default cap fills and
+# silently drops new connections. Requires the nf_conntrack module (loaded below).
+net.netfilter.nf_conntrack_max = 1048576
+
+# Free established-flow conntrack slots faster (default is 5 days)
+net.netfilter.nf_conntrack_tcp_timeout_established = 1200
+
+
 ## UDP settings
 ## ----------------------------------------------------------------
 
@@ -559,6 +588,15 @@ EOF
         echo
         sleep 0.5
     fi
+
+    ## nf_conntrack_max above only exists once the conntrack module is loaded.
+    ## Load + persist it and size the hash table so 'sysctl -p' applies cleanly.
+    ## No bpftune tuner manages conntrack, so this never conflicts with bpftune.
+    if ! lsmod | grep -q '^nf_conntrack'; then
+        modprobe nf_conntrack 2>/dev/null || true
+    fi
+    echo 'nf_conntrack' > /etc/modules-load.d/nf_conntrack.conf
+    echo 'options nf_conntrack hashsize=262144' > /etc/modprobe.d/nf_conntrack.conf
 
     sudo sysctl -p
 
