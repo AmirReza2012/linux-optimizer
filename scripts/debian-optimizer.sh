@@ -116,12 +116,12 @@ install_xanmod() {
         ## Update, Upgrade & Install dependencies
         sudo apt update -q
         sudo apt upgrade -y
-        sudo apt install wget curl gpg -y
+        sudo apt install wget curl gpg ca-certificates -y
 
         ## Check the CPU level
         cpu_level=$(awk -f - <<EOF
         BEGIN {
-            while (!/flags/) if (getline < "/proc/cpuinfo" != 1) exit 1
+            while (!/flags/) if ((getline < "/proc/cpuinfo") != 1) exit 1
             if (/lm/&&/cmov/&&/cx8/&&/fpu/&&/fxsr/&&/mmx/&&/syscall/&&/sse2/) level = 1
             if (level == 1 && /cx16/&&/lahf/&&/popcnt/&&/sse4_1/&&/sse4_2/&&/ssse3/) level = 2
             if (level == 2 && /avx/&&/avx2/&&/bmi1/&&/bmi2/&&/f16c/&&/fma/&&/abm/&&/movbe/&&/xsave/) level = 3
@@ -132,45 +132,49 @@ install_xanmod() {
 EOF
         )
 
-        if [ "$cpu_level" -ge 1 ] && [ "$cpu_level" -le 4 ]; then
-            echo 
+        if [ -n "$cpu_level" ] && [ "$cpu_level" -ge 1 ] && [ "$cpu_level" -le 4 ]; then
+            echo
             yellow_msg "CPU Level: v$cpu_level"
-            echo 
+            echo
 
-            ## Add the XanMod repository key
-            # Define a temporary file for the GPG key
+            ## Create the keyrings directory (modern APT convention)
+            sudo install -m 0755 -d /etc/apt/keyrings
+
+            ## Download the XanMod repository signing key
             tmp_keyring="/tmp/xanmod-archive-keyring.gpg"
 
-            # Try downloading the GPG key from the XanMod link first
-            if ! wget -qO $tmp_keyring https://dl.xanmod.org/archive.key || ! [ -s $tmp_keyring ]; then
-                # If the first attempt fails, try the GitLab link
-                if ! wget -qO $tmp_keyring https://gitlab.com/afrd.gpg || ! [ -s $tmp_keyring ]; then
-                    echo "Both attempts to download the GPG key failed or the file was empty. Exiting."
-                    exit 1
+            # Try the official XanMod key first, fall back to the maintainer's GitLab key
+            if ! curl -fsSL https://dl.xanmod.org/archive.key -o "$tmp_keyring" || ! [ -s "$tmp_keyring" ]; then
+                if ! curl -fsSL https://gitlab.com/afrd.gpg -o "$tmp_keyring" || ! [ -s "$tmp_keyring" ]; then
+                    red_msg "Failed to download the XanMod GPG key. Aborting XanMod install."
+                    rm -f "$tmp_keyring"
+                    return 1
                 fi
             fi
 
-            # If we reach this point, it means we have a non-empty GPG file
-            # Now dearmor the GPG key and move to the final location
-            sudo gpg --dearmor -o /usr/share/keyrings/xanmod-archive-keyring.gpg $tmp_keyring
-
-            # Clean up the temporary file
-            rm -f $tmp_keyring
+            # Dearmor the key into the keyrings directory
+            sudo gpg --dearmor --yes -o /etc/apt/keyrings/xanmod-archive-keyring.gpg "$tmp_keyring"
+            rm -f "$tmp_keyring"
 
             ## Add the XanMod repository
-            echo 'deb [signed-by=/usr/share/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-release.list
-            
-            ## Install XanMod
-            sudo apt update -q && sudo apt install "linux-xanmod-x64v$cpu_level" -y
+            echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-release.list
 
-            ## Clean up
+            ## Install XanMod
             sudo apt update -q
-            sudo apt autoremove --purge -y
-            
-            echo 
-            green_msg "XanMod Kernel Installed. Reboot to Apply the new Kernel."
-            echo 
-            sleep 1
+            if sudo apt install "linux-xanmod-x64v$cpu_level" -y; then
+                ## Clean up
+                sudo apt autoremove --purge -y
+
+                echo
+                green_msg "XanMod Kernel Installed. Reboot to Apply the new Kernel."
+                echo
+                sleep 1
+            else
+                echo
+                red_msg "XanMod package installation failed. Check repository availability."
+                echo
+                sleep 2
+            fi
         else
             echo 
             red_msg "Unsupported CPU. (Check the supported CPUs at xanmod.org)"
