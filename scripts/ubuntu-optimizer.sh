@@ -529,9 +529,40 @@ vm.overcommit_ratio = 100
 
 EOF
 
+    ## If bpftune is present, the static buffer/neigh caps we just wrote would
+    ## disable its auto-tuners (per-tuner all-or-nothing on manual sysctls).
+    ## Offer to strip those lines so bpftune keeps ownership. bbr stays pinned.
+    if command -v bpftune >/dev/null 2>&1 || systemctl is-active --quiet bpftune 2>/dev/null; then
+        echo
+        yellow_msg 'bpftune detected. The static buffer/neigh-table caps above will disable its auto-tuners.'
+        yellow_msg 'Strip those lines and let bpftune keep tuning buffers & neigh table? (y/n)'
+        echo
+        read keep_bpftune
+        echo
+        if [[ "$keep_bpftune" == 'y' || "$keep_bpftune" == 'Y' ]]; then
+            sed -i -e '/net.ipv4.tcp_rmem/d' \
+                -e '/net.ipv4.tcp_wmem/d' \
+                -e '/net.ipv4.tcp_mem/d' \
+                -e '/net.core.rmem_max/d' \
+                -e '/net.core.wmem_max/d' \
+                -e '/net.core.netdev_max_backlog/d' \
+                -e '/net.core.somaxconn/d' \
+                -e '/net.ipv4.udp_mem/d' \
+                -e '/net.ipv4.neigh.default.gc_thresh1/d' \
+                -e '/net.ipv4.neigh.default.gc_thresh2/d' \
+                -e '/net.ipv4.neigh.default.gc_thresh3/d' \
+                "$SYS_PATH"
+            green_msg 'Buffer & neigh-table caps removed. bpftune retains ownership; bbr/bbrv3 still pinned.'
+        else
+            yellow_msg 'Keeping static caps. bpftune buffer/neigh tuners will go dormant (no conflict).'
+        fi
+        echo
+        sleep 0.5
+    fi
+
     sudo sysctl -p
-    
-    echo 
+
+    echo
     green_msg 'Network is Optimized.'
     echo 
     sleep 0.5
