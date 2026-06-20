@@ -174,7 +174,16 @@ EOF
             rm -f "$tmp_keyring"
 
             ## Add the XanMod repository
-            echo 'deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org releases main' | sudo tee /etc/apt/sources.list.d/xanmod-release.list
+            ## XanMod's repo is keyed by distro codename (the old 'releases' suite is gone).
+            distro_codename="$(lsb_release -sc 2>/dev/null)"
+            if [ -z "$distro_codename" ]; then
+                distro_codename="$(. /etc/os-release 2>/dev/null && echo "$VERSION_CODENAME")"
+            fi
+            if [ -z "$distro_codename" ]; then
+                red_msg "Could not determine distro codename. Aborting XanMod install."
+                return 1
+            fi
+            echo "deb [signed-by=/etc/apt/keyrings/xanmod-archive-keyring.gpg] http://deb.xanmod.org $distro_codename main" | sudo tee /etc/apt/sources.list.d/xanmod-release.list
 
             ## Install XanMod
             sudo apt update -q
