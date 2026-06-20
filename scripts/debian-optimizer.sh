@@ -137,6 +137,14 @@ EOF
             yellow_msg "CPU Level: v$cpu_level"
             echo
 
+            ## XanMod ships no x64v4 build; v4 CPUs gain no kernel benefit over v3, so fall back to v3.
+            if [ "$cpu_level" -eq 4 ]; then
+                yellow_msg "XanMod has no x64v4 build (v4 CPUs gain no kernel benefit over v3). Falling back to x64v3."
+                cpu_level=3
+                echo
+                sleep 0.5
+            fi
+
             ## Create the keyrings directory (modern APT convention)
             sudo install -m 0755 -d /etc/apt/keyrings
 
